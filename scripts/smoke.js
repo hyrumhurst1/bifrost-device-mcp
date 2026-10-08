@@ -17,6 +17,7 @@ const policy = path.join(dir, 'policy.json');
 await fs.writeFile(
   policy,
   JSON.stringify({ tasks: { version: { executable: process.execPath, args: ['--version'] } } }),
+  { mode: 0o600 },
 );
 let blockedRequests = 0;
 const blocked = http.createServer((req, res) => {

@@ -251,44 +251,7 @@ export class Bridge {
     const work = async () => {
       if (this.closed) throw Error('Bridge is closed');
       guard();
-      if (!this.browser) {
-        this.browserHome = await fs.mkdtemp(path.join(os.tmpdir(), 'bifrost-browser-'));
-        try {
-          this.egress = await startEgressProxy((url) => this.allowed(url));
-          this.browser = await chromium.launch({
-            headless: true,
-            chromiumSandbox: true,
-            executablePath: this.executablePath,
-            env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: this.browserHome },
-            // Playwright adds <-loopback> to the bypass list, so loopback traffic is proxied too.
-            proxy: { server: this.egress.url },
-          });
-        } catch (error) {
-          await this.egress?.close();
-          this.egress = null;
-          await fs.rm(this.browserHome, { recursive: true, force: true });
-          this.browserHome = null;
-          throw error;
-        }
-        this.context = await this.browser.newContext({
-          acceptDownloads: false,
-          serviceWorkers: 'block',
-        });
-        await this.context.route('**/*', (route) =>
-          this.allowed(route.request().url()) ? route.continue() : route.abort('blockedbyclient'),
-        );
-        await this.context.routeWebSocket('**/*', (socket) => socket.close());
-        this.page = await this.context.newPage();
-        this.page.on('framenavigated', (frame) => {
-          if (frame === this.page.mainFrame()) this.documentVersion++;
-        });
-        this.context.on('page', (page) => {
-          if (page !== this.page) page.close().catch(() => {});
-        });
-        this.page.on('dialog', (dialog) => dialog.dismiss().catch(() => {}));
-        this.page.setDefaultTimeout(5000);
-        this.page.setDefaultNavigationTimeout(10000);
-      }
+      if (!this.browser) await this.launchBrowser();
       guard();
       if (action === 'navigate') {
         if (!this.allowed(args.url)) throw Error('Origin is not operator-approved');
@@ -319,16 +282,56 @@ export class Bridge {
       this.queuedBrowser--;
     });
   }
-  async close() {
-    this.closed = true;
-    for (const child of this.children) killGroup(child);
-    await this.browserQueue;
-    await this.browser?.close();
+  async launchBrowser() {
+    try {
+      this.browserHome = await fs.mkdtemp(path.join(os.tmpdir(), 'bifrost-browser-'));
+      this.egress = await startEgressProxy((url) => this.allowed(url));
+      this.browser = await chromium.launch({
+        headless: true,
+        chromiumSandbox: true,
+        executablePath: this.executablePath,
+        env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: this.browserHome },
+        // Playwright adds <-loopback> to the bypass list, so loopback traffic is proxied too.
+        proxy: { server: this.egress.url },
+      });
+      this.context = await this.browser.newContext({
+        acceptDownloads: false,
+        serviceWorkers: 'block',
+      });
+      await this.context.route('**/*', (route) =>
+        this.allowed(route.request().url()) ? route.continue() : route.abort('blockedbyclient'),
+      );
+      await this.context.routeWebSocket('**/*', (socket) => socket.close());
+      this.page = await this.context.newPage();
+      this.page.on('framenavigated', (frame) => {
+        if (frame === this.page.mainFrame()) this.documentVersion++;
+      });
+      this.context.on('page', (page) => {
+        if (page !== this.page) page.close().catch(() => {});
+      });
+      this.page.on('dialog', (dialog) => dialog.dismiss().catch(() => {}));
+      this.page.setDefaultTimeout(5000);
+      this.page.setDefaultNavigationTimeout(10000);
+    } catch (error) {
+      await this.releaseBrowser();
+      throw error;
+    }
+  }
+  async releaseBrowser() {
+    await this.browser?.close().catch(() => {});
     this.browser = null;
+    this.context = null;
+    this.page = null;
     await this.egress?.close();
     this.egress = null;
     if (this.browserHome) await fs.rm(this.browserHome, { recursive: true, force: true });
     this.browserHome = null;
+  }
+  async close() {
+    this.closed = true;
+    for (const child of this.children) killGroup(child);
+    await this.browserQueue;
+    await this.releaseBrowser();
   }
 }
 export function killGroup(child) {

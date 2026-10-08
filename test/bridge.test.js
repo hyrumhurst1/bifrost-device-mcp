@@ -214,3 +214,25 @@ test('Command errors do not reveal absolute device paths', async (t) => {
     assert.ok(!message.includes('/nonexistent'), message);
   }
 });
+test('A browser that fails during setup is closed and its resources removed', async (t) => {
+  const { chromium } = await import('playwright');
+  const launch = chromium.launch;
+  let closed = false;
+  chromium.launch = async () => ({
+    newContext: async () => {
+      throw Error('context setup failed');
+    },
+    close: async () => {
+      closed = true;
+    },
+  });
+  t.after(() => {
+    chromium.launch = launch;
+  });
+  const { bridge } = await fixture(t);
+  await assert.rejects(bridge.browserAction('snapshot', {}), /context setup failed/);
+  assert.equal(closed, true);
+  assert.equal(bridge.browser, null);
+  assert.equal(bridge.egress, null);
+  assert.equal(bridge.browserHome, null);
+});
