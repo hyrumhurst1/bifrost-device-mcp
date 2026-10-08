@@ -1,6 +1,9 @@
+// MCP tool surface: validates arguments, applies the Auto/Ask policy and an execution guard,
+// then delegates to the bridge. The agent can reduce permissions here but never raise them.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 export function createServer(bridge, policy) {
+  if (!policy) throw Error('A policy is required; Bifrost never serves tools without one');
   const server = new McpServer({ name: 'bifrost-device-mcp', version: '0.1.0' });
   const register = (name, description, inputSchema, fn) =>
     server.registerTool(
@@ -10,14 +13,14 @@ export function createServer(bridge, policy) {
         try {
           const { approvalId, ...actionArgs } = args;
           const binding = name.startsWith('browser_') ? await bridge.browserBinding() : undefined;
-          const epoch = policy?.epoch;
-          const pending = policy?.authorize(
+          const epoch = policy.epoch;
+          const pending = policy.authorize(
             name,
             { ...actionArgs, ...(binding ? { browserBinding: binding } : {}) },
             approvalId,
           );
           const guard = () => {
-            if (policy?.epoch !== epoch) throw Error('Permissions changed; retry the action');
+            if (policy.epoch !== epoch) throw Error('Permissions changed; retry the action');
             if (
               binding &&
               (binding.version !== bridge.documentVersion ||
@@ -104,7 +107,7 @@ export function createServer(bridge, policy) {
       inputSchema: {},
     },
     async () => ({
-      content: [{ type: 'text', text: JSON.stringify(bridge.status(policy?.mode)) }],
+      content: [{ type: 'text', text: JSON.stringify(bridge.status(policy.mode)) }],
     }),
   );
   server.registerTool(
@@ -122,7 +125,7 @@ export function createServer(bridge, policy) {
     'permissions_reduce',
     { description: 'Reduce to Ask mode. The agent cannot increase permissions', inputSchema: {} },
     async () => ({
-      content: [{ type: 'text', text: JSON.stringify(policy?.reduce() ?? { mode: 'ask' }) }],
+      content: [{ type: 'text', text: JSON.stringify(policy.reduce()) }],
     }),
   );
   return server;

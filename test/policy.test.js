@@ -53,3 +53,18 @@ test('Approval queue is bounded', () => {
   for (let i = 0; i < 100; i++) p.authorize('x', { i });
   assert.throws(() => p.authorize('x', {}));
 });
+test('Retrying before the owner approves keeps the request pending', () => {
+  const p = new Policy({ mode: 'ask' });
+  const r = p.authorize('run', { task: 'version' });
+  assert.throws(() => p.authorize('run', { task: 'version' }, r.requestId), /waiting/);
+  assert.equal(p.pendingLocal().length, 1);
+  p.approveLocal(r.requestId);
+  assert.equal(p.authorize('run', { task: 'version' }, r.requestId), null);
+  assert.throws(() => p.authorize('run', { task: 'version' }, r.requestId));
+});
+test('An unapproved request cannot be redirected to another action', () => {
+  const p = new Policy({ mode: 'ask' });
+  const r = p.authorize('run', { task: 'version' });
+  assert.throws(() => p.authorize('run', { task: 'other' }, r.requestId), /invalid/);
+  assert.throws(() => p.approveLocal(r.requestId), /Unknown/);
+});

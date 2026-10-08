@@ -101,3 +101,9 @@ test('Ask mode leaves read-only session health and receipts available', async (t
   assert.equal(receipts.receipts.length, 1);
   assert.ok(!JSON.stringify(receipts).includes('private-content'));
 });
+test('The MCP server refuses to start without a policy', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bifrost-policy-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const bridge = await new Bridge({ workspace: dir }).init();
+  assert.throws(() => createServer(bridge), /policy/i);
+});

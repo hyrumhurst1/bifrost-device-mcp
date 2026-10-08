@@ -1,3 +1,5 @@
+// In-memory Auto/Ask policy. Approvals are bound to an exact action digest, expire, work once,
+// and can only be granted or raised through local owner methods, never through MCP.
 import crypto from 'node:crypto';
 export class Policy {
   constructor({ mode = 'auto', ttlMs = 60000, now = () => Date.now() } = {}) {
@@ -26,6 +28,14 @@ export class Policy {
     const digest = crypto.createHash('sha256').update(JSON.stringify({ tool, args })).digest('hex');
     if (id) {
       const record = this.pending.get(id);
+      if (
+        record &&
+        !record.approved &&
+        record.digest === digest &&
+        record.epoch === this.epoch &&
+        record.expiresAt > this.now()
+      )
+        throw Error('Approval is still waiting for the owner; retry after it is approved');
       this.pending.delete(id);
       if (
         !record ||

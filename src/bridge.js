@@ -1,3 +1,5 @@
+// Capability adapters behind the MCP tools: scoped file helper, fixed command recipes, the
+// isolated browser, receipts and session health.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
