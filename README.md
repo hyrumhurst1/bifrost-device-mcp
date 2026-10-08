@@ -11,7 +11,7 @@ Created by **Hyrum Hurst** · **A Phoenix Labs project**
 
 [How it works](#how-it-works) · [Quick start](#quick-start) · [Security](#security-model) · [Test status](#test-status) · [Connecting Grok](docs/grok.md)
 
-> **Developer preview for Linux and WSL2.** Tested end to end on Ubuntu 24.04 (WSL2) with a sandboxed Chromium: 63 tests, an MCP SDK smoke test and a hosted-agent HTTP check all pass. Not yet tested: a real Grok connection, remote access (Tailscale, tunnels) and macOS. Native Windows refuses to start. Bifrost is an application allowlist, not an OS sandbox.
+> **Developer preview for Linux and WSL2.** Tested end to end on Ubuntu 24.04 (WSL2) and in CI on Ubuntu 22.04 with a sandboxed Chromium: 63 tests, an MCP SDK smoke test and a hosted-agent HTTP check all pass. Not yet tested: a real Grok connection, remote access (Tailscale, tunnels) and macOS. Native Windows refuses to start. Bifrost is an application allowlist, not an OS sandbox.
 
 ## What it does
 
@@ -141,6 +141,7 @@ Bifrost is an application allowlist, not an OS security boundary: recipes run as
 | `npm run smoke`: official MCP SDK client over stdio and loopback HTTP, real browser | Pass |
 | `npm run agent-check`: raw JSON-RPC over authenticated HTTP, Ask approvals from a real console | Pass |
 | `npm audit` | 0 known vulnerabilities |
+| GitHub Actions on ubuntu-22.04: the full `npm run check` | Pass (see badge) |
 | Real Grok connection | Not yet tested ([routes](docs/grok.md)) |
 | Remote access: Tailscale, tunnels, public HTTPS | Not yet tested |
 | macOS | Not yet tested |

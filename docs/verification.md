@@ -32,12 +32,13 @@ Snapshot: 2026-10-08. Every check below ran locally with synthetic fixtures only
 
 **`npm audit`: 0 known vulnerabilities** in the locked dependency tree at this snapshot (not a security guarantee).
 
+**GitHub Actions: pass.** The same `npm run check` (all 63 tests with a sandboxed Chromium, the SDK smoke test and the hosted-agent check) runs on `ubuntu-22.04` for every push; the first green run was on commit `901f10f`. The README badge shows the latest result.
+
 ## Not yet verified
 
 - **Real Grok connection.** No Grok Bot, Grok web connector or xAI API call has reached Bifrost. See [Connecting Grok](grok.md) for the routes and what each one needs.
 - Remote access of any kind: Tailscale Serve or Funnel, tunnels, reverse proxies.
 - macOS, native Ubuntu desktop with AppArmor user-namespace restrictions, and other distributions.
 - Native Windows: unsupported; startup refuses to run.
-- GitHub Actions CI on the published commit (see the badge on the README).
 
 Rerun with `npm ci --ignore-scripts`, `npx playwright install chromium` and `npm run check` on the target machine. Keep passed, failed and skipped stages separate, and never disable Chromium's sandbox to make a check pass. This record is not a production security review or an external audit.
