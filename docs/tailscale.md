@@ -12,7 +12,7 @@ A generic local MCP host can be configured to launch `ssh OWNER_DEVICE` with a f
 
 [Tailscale Serve](https://tailscale.com/kb/1312/serve) makes a service available to the tailnet. [Funnel](https://tailscale.com/kb/1223/funnel) makes it public and is deliberately out of scope here. Review [grants](https://tailscale.com/kb/1324/grants) so only your intended caller identity can reach the service.
 
-The current HTTP server accepts exactly `127.0.0.1:PORT` as Host. A reviewed reverse proxy must preserve/rewrite the internal Host correctly while validating the external hostname, terminate TLS, retain bearer authorization, and leave untrusted browser origins rejected. No ready-to-run Serve command is supplied because proxy Host behavior and caller reachability must be tested on the actual target rather than weakening the guard to make routing work.
+The current HTTP server accepts exactly `127.0.0.1:PORT` as Host. Tailscale Serve forwards the caller's original `*.ts.net` Host header to the backend, so a plain Serve route to Bifrost is refused with 403. A reviewed reverse proxy must rewrite the internal Host correctly while validating the external hostname, terminate TLS, retain bearer authorization, and leave untrusted browser origins rejected. No ready-to-run Serve command is supplied because proxy Host behavior and caller reachability must be tested on the actual target rather than weakening the guard to make routing work.
 
 ## Acceptance checklist
 
@@ -23,4 +23,4 @@ The current HTTP server accepts exactly `127.0.0.1:PORT` as Host. A reviewed rev
 5. Verify wrong/missing auth, unauthorized tailnet identity, hostile Host/Origin, off-origin browser requests and cancellation fail safely
 6. Disconnect/restart/revoke and verify access disappears and no child/browser processes remain
 
-Hosted Grok's ability to call a public remote MCP URL does not prove it can route into your private tailnet. See [compatibility](compatibility.md). Do not make a privileged bridge public just to resolve that mismatch.
+Hosted Grok's ability to call a public remote MCP URL does not prove it can route into your private tailnet. See [Connecting Grok](grok.md) and [compatibility](compatibility.md). Do not make a privileged bridge public just to resolve that mismatch.

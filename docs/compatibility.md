@@ -2,6 +2,8 @@
 
 Documentation checked on 2026-10-08. Documented client capability is not an end-to-end integration test. See the repository's actual test results before claiming a client has been tested.
 
+For the concrete setup routes and their status, see [Connecting Grok](grok.md).
+
 ## Grok surfaces are different
 
 - **xAI API:** remote MCP accepts Streamable HTTP or legacy HTTP+SSE, an HTTPS server URL, a server label, optional authorization/custom headers, and tool-name filtering. The OpenAI-compatible Responses API does **not** support `require_approval` or `connector_id`. Enforce safety in this server; never depend on an API approval flag. [Official API documentation](https://docs.x.ai/developers/tools/remote-mcp)

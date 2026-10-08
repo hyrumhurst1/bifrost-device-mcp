@@ -2,70 +2,46 @@
 
 # Bifrost
 
-**Give your agent useful tools on a computer you control.**
+**Let an AI agent work on your computer through doors you choose: fixed command recipes, a read-only workspace and a locked-down browser, with permissions enforced outside the agent's reach.**
 
-Bifrost is an open-source MCP bridge for scoped files, owner-configured terminal recipes, and a fresh browser session. Connect an MCP client, choose its boundaries, and keep approval in your hands.
+[![Verify](https://github.com/hyrumhurst1/bifrost-device-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/hyrumhurst1/bifrost-device-mcp/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-ff936a.svg)](LICENSE)
 
-Created by **Hyrum Hurst** · **A Phoenix Labs project** · [MIT](LICENSE)
+Created by **Hyrum Hurst** · **A Phoenix Labs project**
 
-[Quick start](#quick-start) · [Tools](#tools) · [Client compatibility](docs/compatibility.md) · [Security](SECURITY.md) · [Test status](docs/verification.md)
+[How it works](#how-it-works) · [Quick start](#quick-start) · [Security](#security-model) · [Test status](#test-status) · [Connecting Grok](docs/grok.md)
 
-## One bridge. Three ways to work.
+> **Developer preview for Linux and WSL2.** Tested end to end on Ubuntu 24.04 (WSL2) with a sandboxed Chromium: 56 tests, an MCP SDK smoke test and a hosted-agent HTTP check all pass. Not yet tested: a real Grok connection, remote access (Tailscale, tunnels) and macOS. Native Windows refuses to start. Bifrost is an application allowlist, not an OS sandbox.
 
-- **Read your workspace.** List and read files inside a dedicated directory, with traversal and symlink checks.
-- **Run your recipes.** Expose specific commands with fixed arguments, timeouts, output limits, and cancellation.
-- **Use a fresh browser.** Navigate, inspect, click, fill, and capture screenshots in separate headless Chromium, with exact-origin allowlists and no personal browser profile.
+## What it does
 
-Use **stdio** for a local MCP host or authenticated **loopback Streamable HTTP** for an independently configured connection. Check session health and the latest 100 metadata-only receipts, including after an HTTP reconnect to the same running process.
+Bifrost is an [MCP](https://modelcontextprotocol.io) server you run on your own machine. Any MCP client can connect: a local host over stdio, or a hosted agent such as Grok over authenticated HTTP once you choose how to route it.
 
-## Your tools. Your boundaries.
+- **Read a workspace.** List and read files inside one dedicated directory. Traversal, symlinks and special files are refused.
+- **Run your recipes.** You name exact commands with fixed arguments in a policy file. The agent picks a recipe by name; it cannot add arguments or use a shell.
+- **Use a fresh browser.** Navigate, read, click, fill and screenshot in a separate headless Chromium with its sandbox on, a throwaway profile and an exact list of allowed sites. Every web request, including each redirect, goes through a filter that only lets those sites through.
+
+## How it works
+
+```mermaid
+flowchart LR
+  agent["AI agent<br/>(Grok, any MCP client)"] -->|"MCP: stdio, or loopback HTTP + token"| bifrost["Bifrost tools"]
+  bifrost --> gate{"Auto / Ask"}
+  owner["You, in your terminal"] -->|"approve, raise mode"| gate
+  gate --> files["Workspace files<br/>read-only"]
+  gate --> recipes["Command recipes<br/>fixed, no shell"]
+  gate --> browser["Sandboxed browser"]
+  browser --> filter["Egress filter"] --> sites["Allowed sites only"]
+```
+
+The rules live in the Bifrost process and in your terminal, not in the agent's conversation.
 
 | Mode | What happens |
 | --- | --- |
-| **Auto** | Runs the capabilities you configured: fixed terminal recipes, scoped file tools, and allowed browser origins |
-| **Ask** | Queues an exact action for approval in your local terminal; approvals expire after 60 seconds and work once |
+| **Auto** | The capabilities you configured run: your recipes, the workspace files and the allowed sites. |
+| **Ask** | Each action waits. You see the exact action in your terminal and approve it there; an approval works once, for that action only, within 60 seconds of the request. |
 
-An agent can reduce its access to Ask. Only the local owner console can approve an action or raise the mode. Chat messages do not grant approval. Arbitrary shell execution and Bypass are unsupported.
-
-> **Developer preview · Linux-first.** Native Windows is unsupported; macOS and the complete browser/client setup still need target-device validation. Local regression and MCP transport checks have passed; integrated browser, Grok, and tunnel end-to-end checks remain open. Bifrost is an application allowlist, not an OS security boundary. Use trusted, bounded recipes and avoid credentials or consequential transactions. [Full test status](docs/verification.md) · [Security model](SECURITY.md)
-
-## Quick start
-
-Use Node.js 22+, `/usr/bin/python3`, and Chromium with a working sandbox. Run as an unprivileged user. Keep the installation and owner policy outside the dedicated workspace.
-
-```sh
-git clone https://github.com/hyrumhurst1/bifrost-device-mcp.git
-cd bifrost-device-mcp
-npm ci --ignore-scripts
-npx playwright install chromium
-
-mkdir -p "$HOME/bifrost-workspace" "$HOME/.config/bifrost"
-cp examples/policy.json "$HOME/.config/bifrost/policy.json"
-```
-
-Edit the example policy's `executable` to the absolute path returned by `command -v node`. The included recipe runs `node --version`.
-
-Add Bifrost to your local MCP host, replacing the paths below:
-
-```json
-{
-  "mcpServers": {
-    "bifrost": {
-      "command": "/absolute/path/to/node",
-      "args": ["/absolute/path/to/bifrost-device-mcp/src/cli.js"],
-      "env": {
-        "BIFROST_WORKSPACE": "/absolute/path/to/bifrost-workspace",
-        "BIFROST_POLICY": "/absolute/path/to/owner-policy.json",
-        "BIFROST_BROWSER_ORIGINS": "[]"
-      }
-    }
-  }
-}
-```
-
-Try asking your client to list the workspace, show the available terminal tasks, and run `node-version`. Browser access starts closed: set `BIFROST_BROWSER_ORIGINS` to explicit exact origins such as `["http://127.0.0.1:8080"]` to enable it.
-
-For a direct stdio launch, set `BIFROST_WORKSPACE` and `BIFROST_POLICY`, then run `npm start`. It waits for an MCP client on stdin. Setup creates no tunnel, credentials, startup service, or personal browser connection.
+The agent can lower its own access to Ask with `permissions_reduce`. It cannot raise the mode, approve its own requests, pass arguments to commands, read outside the workspace or browse outside the allowed sites. Chat messages and the client's own approval buttons do not count as your approval. Arbitrary shell access and a "bypass" mode are not supported.
 
 ## Tools
 
@@ -76,32 +52,112 @@ For a direct stdio launch, set `BIFROST_WORKSPACE` and `BIFROST_POLICY`, then ru
 | Browser | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_screenshot` |
 | Session | `session_status`, `recent_receipts`, `permissions_reduce` |
 
-Use one trusted client/operator per bridge process. Session IDs, receipts, and approvals live for that process; restarting creates a new session.
+## Requirements
 
-## Local approvals
+- **Linux, or Windows with WSL2.** Tested on Ubuntu 24.04 under WSL2. macOS is untested. Native Windows is unsupported and refuses to start.
+- **Node.js 22+** and **`/usr/bin/python3`**.
+- **Playwright's Chromium with a working sandbox**, run as an ordinary user, never root. If the sandbox will not start (some distributions restrict unprivileged user namespaces), fix the host; never disable the sandbox.
+- On WSL, keep the install, workspace and policy on the Linux filesystem (for example under `~`), not under `/mnt/c`. Files there look world-writable to Linux, and Bifrost refuses a policy anyone could edit.
 
-Launch from your own terminal with `BIFROST_MODE=ask BIFROST_APPROVAL_CONSOLE=1` alongside your workspace, policy, and transport settings. The owner console uses `/dev/tty`, separately from MCP traffic, and requires a controlling terminal.
+## Quick start
 
-Review with `pending`, grant with `approve REQUEST_ID`, and change modes with `mode auto` or `mode ask`. After approval, retry the exact tool call with its `approvalId`. Changed, expired, reused, or invalidated approvals are rejected.
+```sh
+git clone https://github.com/hyrumhurst1/bifrost-device-mcp.git
+cd bifrost-device-mcp
+npm ci --ignore-scripts
+npx playwright install chromium
 
-## Check your setup
+mkdir -p ~/bifrost-workspace ~/.config/bifrost
+cp examples/policy.json ~/.config/bifrost/policy.json
+chmod 600 ~/.config/bifrost/policy.json
+```
+
+Set the example recipe's `executable` to the absolute path from `command -v node`. It runs `node --version`. Then check the machine:
 
 ```sh
 npm run check
 ```
 
-The full check runs regression tests and a synthetic MCP demo covering files, a terminal recipe, browser interaction, screenshots, origin restrictions, and authenticated HTTP. See the [verification record](docs/verification.md) for completed checks and remaining acceptance tests. Never disable Chromium's sandbox to make a check pass.
+Add Bifrost to your MCP host, replacing the paths:
 
-## Connect further
+```json
+{
+  "mcpServers": {
+    "bifrost": {
+      "command": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/bifrost-device-mcp/src/cli.js"],
+      "env": {
+        "BIFROST_WORKSPACE": "/home/you/bifrost-workspace",
+        "BIFROST_POLICY": "/home/you/.config/bifrost/policy.json",
+        "BIFROST_BROWSER_ORIGINS": "[]"
+      }
+    }
+  }
+}
+```
 
-- [Client compatibility](docs/compatibility.md): local hosts, Grok surfaces, and deployment requirements
-- [Private Tailscale setup](docs/tailscale.md): operator-managed routing and authentication
-- [Architecture](docs/architecture.md): transports, tools, approvals, and process lifecycle
-- [Security](SECURITY.md): deployment boundaries and residual risks
-- [Brand assets](docs/assets/README.md): banner, social card, wordmark, and icon
+Ask your client to list the workspace, show the terminal tasks and run `node-version`. The browser starts closed: set `BIFROST_BROWSER_ORIGINS` to exact origins such as `["http://127.0.0.1:8080"]` to open it to those sites only.
 
-HTTP is opt-in, loopback-only, and requires an existing operator-provided token. Hosted clients need a separately configured route; a private tailnet URL alone does not make your machine reachable to hosted Grok. Review the connection guide before enabling remote access.
+### Configuration
+
+| Variable | Meaning |
+| --- | --- |
+| `BIFROST_WORKSPACE` | Required. The only directory the agent can read. Must not contain the Bifrost install. |
+| `BIFROST_POLICY` | Your recipes: `{"tasks": {"name": {"executable": "/abs/path", "args": [], "timeoutMs": 10000}}}`. Outside the workspace, owned by you, not writable by others. |
+| `BIFROST_BROWSER_ORIGINS` | JSON array of exact origins the browser may reach. Default `[]`. |
+| `BIFROST_MODE` | `auto` (default) or `ask`. |
+| `BIFROST_APPROVAL_CONSOLE` | `1` to open the owner console on your terminal. |
+| `BIFROST_TRANSPORT` | `stdio` (default) or `http` (loopback only). |
+| `BIFROST_PORT`, `BIFROST_HTTP_TOKEN` | HTTP port (default 7331) and a token of at least 32 characters that you generate. Bifrost never creates credentials. |
+| `BIFROST_AUDIT_FILE` | Optional metadata-only receipt log, outside the workspace. |
+
+## Approve actions from your terminal
+
+Start Bifrost from your own terminal with `BIFROST_MODE=ask BIFROST_APPROVAL_CONSOLE=1` plus your workspace, policy and transport settings. The console reads your terminal directly, separate from MCP traffic:
+
+```text
+pending                 show waiting actions, exactly as they will run
+approve REQUEST_ID      approve one action, once
+mode auto | mode ask    change the mode
+```
+
+The agent then retries the same call with the `approvalId` it was given. Changed, expired, replayed or mode-invalidated approvals are refused. The console needs a terminal, so it is not available when an MCP host launches Bifrost in the background.
+
+## Security model
+
+- **Outside the agent's reach.** Mode and approvals live in the Bifrost process and change only from your terminal. The policy file sits outside the workspace and must not be writable by others. MCP can only lower permissions.
+- **Exact actions.** An approval is bound to the tool, its arguments and, for the browser, the current page. It expires after 60 seconds and works once.
+- **No injection.** Recipes have fixed arguments and no shell. File access is descriptor-relative with no symlink following. Command errors do not reveal device paths.
+- **Contained browser.** Fresh profile, sandbox required, downloads and popups blocked, WebSockets closed, and every web request and redirect checked against your exact origins.
+- **Fails closed.** Bad configuration stops startup; HTTP is loopback-only and checks the token, Host and Origin.
+
+Bifrost is an application allowlist, not an OS security boundary: recipes run as your user and can do whatever that user can. Keep recipes harmless and narrow, avoid credentials and consequential sites, and use a dedicated user, container or VM for untrusted workloads. Read [SECURITY.md](SECURITY.md) for the full model and residual risks.
+
+## Test status
+
+| Check | Result |
+| --- | --- |
+| `npm test`: 56 tests, including real sandboxed Chromium | Pass |
+| `npm run smoke`: official MCP SDK client over stdio and loopback HTTP, real browser | Pass |
+| `npm run agent-check`: raw JSON-RPC over authenticated HTTP, Ask approvals from a real console | Pass |
+| `npm audit` | 0 known vulnerabilities |
+| Real Grok connection | Not yet tested ([routes](docs/grok.md)) |
+| Remote access: Tailscale, tunnels, public HTTPS | Not yet tested |
+| macOS | Not yet tested |
+
+Details, versions and exactly what each check covers: [verification record](docs/verification.md).
+
+## Documentation
+
+- [Connecting Grok](docs/grok.md): Grok Bot on your own computer, or remote HTTPS, and what each needs
+- [Client compatibility](docs/compatibility.md): local hosts, Grok surfaces and deployment choices
+- [Tailscale](docs/tailscale.md): private routing templates and their limits
+- [Architecture](docs/architecture.md): modules, transports and approvals
+- [Security](SECURITY.md): boundaries and residual risks
+- [Brand assets](docs/assets/README.md): banner, social card, wordmark and icon
 
 ---
+
+Created by **Hyrum Hurst** · **A Phoenix Labs project** · [MIT](LICENSE)
 
 **Bifrost Device MCP** (`bifrost-device-mcp`) is an independent project, unrelated to other products or companies named Bifrost.

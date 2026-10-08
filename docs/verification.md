@@ -1,20 +1,43 @@
 # Verification record
 
-Snapshot: 2026-10-08. Local cloud build only; no personal device/browser, Tailscale change, Grok session, credential creation, or public deployment.
+Snapshot: 2026-10-08. Every check below ran locally with synthetic fixtures only: no personal browser profile, no real accounts, no credentials beyond a fixed test token, no Tailscale or firewall change, no public exposure and no Grok session.
+
+## Environment
+
+| Item | Version |
+| --- | --- |
+| OS | Ubuntu 24.04.4 LTS on WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2), native Linux filesystem |
+| User | Ordinary unprivileged user (not root) |
+| Node.js / Python | 22.20.0 / 3.12.3 (`/usr/bin/python3`) |
+| Playwright / browser | 1.64.0 / Chrome Headless Shell 156.0.8078.4, **Chromium sandbox enabled** |
+| MCP SDK | `@modelcontextprotocol/sdk` 1.32.1 |
+| Pseudo-terminal | util-linux `script` 2.39.3 (owner-console check) |
 
 ## Passed
 
-- 27 Node regression tests: scoped files, symlink ancestor refusal, FIFO nonblocking failure, command allowlist/environment/literal arguments/output/timeout/cancellation, task admission limits, redacted audit and logging failure, browser origin validation, lifecycle closure, approval TTL/replay/action binding/concurrency/mode changes, browser document target change, queued Auto invalidation, browser queue cap, read-only session status, bounded redacted receipt retrieval in Ask
-- `npm audit`: zero known advisories across the locked dependency tree at this snapshot (not a security guarantee)
-- Actual official SDK stdio initialize/listTools/callTool against a spawned server, reading a synthetic file and executing Node's version command
-- Actual official SDK authenticated loopback HTTP initialize/callTool; missing auth, hostile Host/Origin, oversized request rejection; HTTP reconnection retains process session ID and receipts
+**`npm test`: 56 of 56 tests pass.**
 
-## Blocked / not yet verified
+- Files: workspace scoping, symlink and symlink-ancestor refusal, FIFO non-blocking refusal, read and listing limits
+- Terminal recipes: allowlist, prototype names, literal arguments (no shell), reduced environment, output cap, timeout, cancellation, admission limits, executables inside the workspace refused (including a workspace at `/`), errors without absolute device paths
+- Configuration: native Windows, root workspace, workspace containing the installation, policy inside the workspace, group/world-writable policy, malformed recipes, inexact origins and an audit file inside the workspace all refuse to start
+- Approvals: Auto/Ask, bypass refused, action binding, expiry, single use, concurrent consumption, queue cap, mode changes, early retries keep the request pending, browser document binding, queued work invalidated by a mode change, no server without a policy
+- Owner console: list, approve once, local mode changes, bypass refused, agent text shown with control and bidi characters escaped
+- Egress proxy: loopback only, approved origins forwarded, redirects passed back unfollowed, unapproved origins and CONNECT tunnels refused without contacting them
+- **Real Chromium** (sandbox on): navigation and subresource redirects to unapproved origins blocked with zero requests reaching the unapproved server, same-origin redirects still work, browser launched without `--no-sandbox` and with all traffic sent through the egress proxy, browser processes and temporary home removed on close, failed browser setup fully torn down
+- Receipts and session status: bounded, metadata only, available in Ask
 
-- Real Chromium browser integration: the cloud execution runtime refused Chromium's local Unix socket creation. The official Playwright browser download also returned an invalid/truncated archive. No sandbox weakening or personal browser fallback was used. Full `npm run check` correctly fails rather than claiming success. A diagnostic subset used `BIFROST_SKIP_BROWSER=1` and explicitly labels browser unverified.
-- macOS, sandboxed Chromium startup, local approval-console UX and complete lifecycle cleanup on the owner's device
-- Published CI on the final commit
-- Real Grok/Grokbot authorization and browser/terminal end-to-end flow
-- Private-tailnet reachability from the actual Grok MCP caller
+**`npm run smoke`: pass.** Official MCP SDK client over stdio against a spawned server: handshake, 12 tools, file read, terminal recipe, path traversal refused, real browser fill/click/snapshot/screenshot, unapproved navigation, subresource and redirect blocked, Ask mode. Official SDK client over authenticated loopback HTTP: missing token, hostile Host and Origin, oversized body refused; reconnection keeps the session ID and receipts.
 
-Run `npm ci --ignore-scripts`, `npx playwright install chromium`, and `npm run check` on the intended target/CI before replacing this record with new evidence. Keep passed/failed/skipped stages separate. This record is not a production security review.
+**`npm run agent-check`: pass.** Raw JSON-RPC over Streamable HTTP with a bearer token, the way a hosted MCP client calls a remote server, with the bridge in Ask mode and its owner console on a pseudo-terminal: missing and wrong tokens refused, no tool can raise permissions or approve, an agent-supplied `approved` field and early retries run nothing, a console approval runs the exact action once, replay and swapped arguments refused, only the console raises Ask to Auto.
+
+**`npm audit`: 0 known vulnerabilities** in the locked dependency tree at this snapshot (not a security guarantee).
+
+## Not yet verified
+
+- **Real Grok connection.** No Grok Bot, Grok web connector or xAI API call has reached Bifrost. See [Connecting Grok](grok.md) for the routes and what each one needs.
+- Remote access of any kind: Tailscale Serve or Funnel, tunnels, reverse proxies.
+- macOS, native Ubuntu desktop with AppArmor user-namespace restrictions, and other distributions.
+- Native Windows: unsupported; startup refuses to run.
+- GitHub Actions CI on the published commit (see the badge on the README).
+
+Rerun with `npm ci --ignore-scripts`, `npx playwright install chromium` and `npm run check` on the target machine. Keep passed, failed and skipped stages separate, and never disable Chromium's sandbox to make a check pass. This record is not a production security review or an external audit.
