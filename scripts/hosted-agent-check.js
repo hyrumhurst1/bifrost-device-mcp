@@ -143,7 +143,8 @@ try {
   );
 
   await ownerTypes('pending', new RegExp(request.data.requestId));
-  await ownerTypes(`approve ${request.data.requestId}`, /Approved once/);
+  await ownerTypes(`approve ${request.data.requestId}`, /"tool": "terminal_run"[\s\S]*Type yes/);
+  await ownerTypes('yes', /Approved once/);
   const approved = await callTool('terminal_run', {
     task: 'version',
     approvalId: request.data.requestId,
@@ -157,7 +158,8 @@ try {
   assert.equal(replay.isError, true);
   const other = await callTool('workspace_read', { path: 'hello.txt' });
   assert.equal(other.data.status, 'approval_required');
-  await ownerTypes(`approve ${other.data.requestId}`, /Approved once/);
+  await ownerTypes(`approve ${other.data.requestId}`, /Type yes/);
+  await ownerTypes('yes', /Approved once/);
   const swapped = await callTool('workspace_read', {
     path: '../policy.json',
     approvalId: other.data.requestId,

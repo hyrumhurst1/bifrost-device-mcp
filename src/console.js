@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import readline from 'node:readline';
 
 const HELP =
-  'Bifrost owner console: pending | approve REQUEST_ID | mode auto | mode ask. Bypass is unsupported.';
+  'Bifrost owner console: pending | approve REQUEST_ID, then yes | mode auto | mode ask. Bypass is unsupported.';
 
 // Agent-supplied strings could otherwise carry terminal escapes, C1 controls or bidi overrides
 // that make a pending request look different from what will run.
@@ -26,26 +26,42 @@ export function formatPending(pending, now = Date.now()) {
   return escapeForTerminal(JSON.stringify(shown, null, 2));
 }
 
-export function handleConsoleLine(policy, line, write) {
-  try {
-    const [command, argument] = line.trim().split(/\s+/);
-    if (command === 'pending') write(formatPending(policy.pendingLocal()));
-    else if (command === 'approve') {
-      policy.approveLocal(argument);
-      write('Approved once');
-    } else if (command === 'mode') {
-      policy.setLocal(argument);
-      write(`Mode ${policy.mode}`);
-    } else write('Unknown command');
-  } catch (error) {
-    write(escapeForTerminal(error.message));
-  }
+// Approving is two steps: the console shows the exact action, then waits for "yes". An agent
+// that asks the owner in chat to "approve this ID" cannot hide what the ID would run.
+export function createConsoleHandler(policy) {
+  let confirming = null;
+  return (line, write) => {
+    try {
+      const [command, argument] = line.trim().split(/\s+/);
+      if (confirming) {
+        const id = confirming;
+        confirming = null;
+        if (command !== 'yes') return write('Not approved');
+        policy.approveLocal(id);
+        return write('Approved once');
+      }
+      if (command === 'pending') write(formatPending(policy.pendingLocal()));
+      else if (command === 'approve') {
+        const request = policy.pendingLocal().find((pending) => pending.id === argument);
+        if (!request) throw Error('Unknown or expired request');
+        write(formatPending([request]));
+        write('Approve exactly this action, once? Type yes to approve; anything else cancels.');
+        confirming = argument;
+      } else if (command === 'mode') {
+        policy.setLocal(argument);
+        write(`Mode ${policy.mode}`);
+      } else write('Unknown command');
+    } catch (error) {
+      write(escapeForTerminal(error.message));
+    }
+  };
 }
 
 export function attachApprovalConsole(policy, { input, output }) {
   const lines = readline.createInterface({ input, terminal: false });
+  const handle = createConsoleHandler(policy);
   output.write(`${HELP}\n`);
-  lines.on('line', (line) => handleConsoleLine(policy, line, (text) => output.write(`${text}\n`)));
+  lines.on('line', (line) => handle(line, (text) => output.write(`${text}\n`)));
   return {
     close() {
       lines.close();

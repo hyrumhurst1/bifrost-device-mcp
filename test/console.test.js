@@ -42,7 +42,8 @@ test('Owner console lists, approves once and changes mode locally', async (t) =>
   const { policy, send } = consoleFixture(t);
   const request = policy.authorize('terminal_run', { task: 'version', cwd: '.' });
   assert.match(await send('pending'), new RegExp(request.requestId));
-  assert.match(await send(`approve ${request.requestId}`), /Approved once/);
+  assert.match(await send(`approve ${request.requestId}`), /type yes/i);
+  assert.match(await send('yes'), /Approved once/);
   assert.equal(
     policy.authorize('terminal_run', { task: 'version', cwd: '.' }, request.requestId),
     null,
@@ -57,4 +58,19 @@ test('Owner console refuses bypass, unknown requests and unknown commands', asyn
   assert.equal(policy.mode, 'ask');
   assert.match(await send('approve 00000000-0000-4000-8000-000000000000'), /Unknown or expired/);
   assert.match(await send('grant everything'), /Unknown command/);
+});
+
+test('Approving shows the exact action and needs an explicit yes', async (t) => {
+  const { policy, send } = consoleFixture(t);
+  const request = policy.authorize('browser_fill', { selector: '#q', value: 'hello' });
+  const shown = await send(`approve ${request.requestId}`);
+  assert.match(shown, /browser_fill/);
+  assert.match(shown, /hello/);
+  assert.match(shown, /yes/);
+  assert.equal(policy.pendingLocal()[0].approved, false);
+  assert.match(await send('no'), /Not approved/);
+  assert.equal(policy.pendingLocal()[0].approved, false);
+  await send(`approve ${request.requestId}`);
+  assert.match(await send('yes'), /Approved once/);
+  assert.equal(policy.pendingLocal()[0].approved, true);
 });
