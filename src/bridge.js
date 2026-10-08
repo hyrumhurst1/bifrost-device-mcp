@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 const execFileAsync = promisify(execFile);
 import { chromium } from 'playwright';
+import { startEgressProxy } from './egress.js';
 
 export class Bridge {
   constructor({ workspace, recipes = {}, origins = [], executablePath, auditFile }) {
@@ -232,6 +233,10 @@ export class Bridge {
       return false;
     }
   }
+  pageIsApproved() {
+    const url = this.page.url();
+    return url === 'about:blank' || this.allowed(url);
+  }
   async browserBinding() {
     return { version: this.documentVersion, url: this.page?.url() ?? 'about:blank' };
   }
@@ -244,13 +249,18 @@ export class Bridge {
       if (!this.browser) {
         this.browserHome = await fs.mkdtemp(path.join(os.tmpdir(), 'bifrost-browser-'));
         try {
+          this.egress = await startEgressProxy((url) => this.allowed(url));
           this.browser = await chromium.launch({
             headless: true,
             chromiumSandbox: true,
             executablePath: this.executablePath,
             env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: this.browserHome },
+            // Playwright adds <-loopback> to the bypass list, so loopback traffic is proxied too.
+            proxy: { server: this.egress.url },
           });
         } catch (error) {
+          await this.egress?.close();
+          this.egress = null;
           await fs.rm(this.browserHome, { recursive: true, force: true });
           this.browserHome = null;
           throw error;
@@ -277,9 +287,15 @@ export class Bridge {
       guard();
       if (action === 'navigate') {
         if (!this.allowed(args.url)) throw Error('Origin is not operator-approved');
-        await this.page.goto(args.url, { waitUntil: 'domcontentloaded' });
+        try {
+          await this.page.goto(args.url, { waitUntil: 'domcontentloaded' });
+        } finally {
+          if (!this.pageIsApproved()) await this.page.goto('about:blank').catch(() => {});
+        }
         if (!this.allowed(this.page.url())) throw Error('Navigation left approved origins');
-      } else if (action === 'click') await this.page.locator(args.selector).click();
+      } else if (!this.pageIsApproved())
+        throw Error('The current page is outside approved origins; navigate to an approved origin');
+      else if (action === 'click') await this.page.locator(args.selector).click();
       else if (action === 'fill') await this.page.locator(args.selector).fill(args.value);
       else if (action === 'screenshot')
         return {
@@ -304,6 +320,8 @@ export class Bridge {
     await this.browserQueue;
     await this.browser?.close();
     this.browser = null;
+    await this.egress?.close();
+    this.egress = null;
     if (this.browserHome) await fs.rm(this.browserHome, { recursive: true, force: true });
     this.browserHome = null;
   }

@@ -10,7 +10,7 @@ import { Policy } from '../src/policy.js';
 import { createServer } from '../src/server.js';
 async function setup(t, mode = 'ask') {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bifrost-policy-'));
-  const bridge = await new Bridge({ workspace: dir }).init();
+  const bridge = await new Bridge({ workspace: dir, origins: ['https://fixture.invalid'] }).init();
   let url = 'https://fixture.invalid/a',
     clicks = 0;
   bridge.browser = { close: async () => {} };
