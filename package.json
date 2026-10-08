@@ -1,0 +1,23 @@
+{
+  "name": "bifrost-device-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Approval-first, isolated terminal and browser MCP bridge",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test test/*.test.js",
+    "smoke": "node scripts/smoke.js",
+    "check": "node --check src/cli.js && node --check src/bridge.js && npm test && npm run smoke"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "playwright": "1.64.0",
+    "zod": "3.25.76"
+  },
+  "license": "MIT",
+  "author": "Hyrum Hurst"
+}

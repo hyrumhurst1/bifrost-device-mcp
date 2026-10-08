@@ -1,0 +1,1 @@
+{"tasks":{"node-version":{"executable":"/usr/bin/node","args":["--version"],"timeoutMs":1000}}}

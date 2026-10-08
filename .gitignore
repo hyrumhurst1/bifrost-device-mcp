@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+artifacts/
+coverage/
+*.png
+!docs/assets/*.png
+policy.local.json
