@@ -11,7 +11,7 @@ Created by **Hyrum Hurst** · **A Phoenix Labs project**
 
 [How it works](#how-it-works) · [Quick start](#quick-start) · [Security](#security-model) · [Test status](#test-status) · [Connecting Grok](docs/grok.md)
 
-> **Developer preview for Linux and WSL2.** Tested end to end on Ubuntu 24.04 (WSL2) with a sandboxed Chromium: 56 tests, an MCP SDK smoke test and a hosted-agent HTTP check all pass. Not yet tested: a real Grok connection, remote access (Tailscale, tunnels) and macOS. Native Windows refuses to start. Bifrost is an application allowlist, not an OS sandbox.
+> **Developer preview for Linux and WSL2.** Tested end to end on Ubuntu 24.04 (WSL2) with a sandboxed Chromium: 63 tests, an MCP SDK smoke test and a hosted-agent HTTP check all pass. Not yet tested: a real Grok connection, remote access (Tailscale, tunnels) and macOS. Native Windows refuses to start. Bifrost is an application allowlist, not an OS sandbox.
 
 ## What it does
 
@@ -117,7 +117,7 @@ Start Bifrost from your own terminal with `BIFROST_MODE=ask BIFROST_APPROVAL_CON
 
 ```text
 pending                 show waiting actions, exactly as they will run
-approve REQUEST_ID      approve one action, once
+approve REQUEST_ID      show that exact action; type yes to approve it once
 mode auto | mode ask    change the mode
 ```
 
@@ -126,7 +126,7 @@ The agent then retries the same call with the `approvalId` it was given. Changed
 ## Security model
 
 - **Outside the agent's reach.** Mode and approvals live in the Bifrost process and change only from your terminal. The policy file sits outside the workspace and must not be writable by others. MCP can only lower permissions.
-- **Exact actions.** An approval is bound to the tool, its arguments and, for the browser, the current page. It expires after 60 seconds and works once.
+- **Exact actions.** You see the exact action before you confirm it. An approval is bound to the tool, its arguments and, for the browser, the current page; a click or fill cannot land on a page that replaced it. It expires after 60 seconds and works once.
 - **No injection.** Recipes have fixed arguments and no shell. File access is descriptor-relative with no symlink following. Command errors do not reveal device paths.
 - **Contained browser.** Fresh profile, sandbox required, downloads and popups blocked, WebSockets closed, and every web request and redirect checked against your exact origins.
 - **Fails closed.** Bad configuration stops startup; HTTP is loopback-only and checks the token, Host and Origin.
@@ -137,7 +137,7 @@ Bifrost is an application allowlist, not an OS security boundary: recipes run as
 
 | Check | Result |
 | --- | --- |
-| `npm test`: 56 tests, including real sandboxed Chromium | Pass |
+| `npm test`: 63 tests, including real sandboxed Chromium | Pass |
 | `npm run smoke`: official MCP SDK client over stdio and loopback HTTP, real browser | Pass |
 | `npm run agent-check`: raw JSON-RPC over authenticated HTTP, Ask approvals from a real console | Pass |
 | `npm audit` | 0 known vulnerabilities |
