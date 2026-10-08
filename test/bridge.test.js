@@ -187,3 +187,30 @@ test('Recent receipts are bounded, copied and contain no command output', async 
   assert.throws(() => bridge.recentReceipts(101));
   assert.throws(() => bridge.recentReceipts(0));
 });
+test('A workspace at the filesystem root still refuses workspace executables', async (t) => {
+  const bridge = await new Bridge({
+    workspace: '/',
+    recipes: { version: { executable: process.execPath, args: ['--version'] } },
+  }).init();
+  t.after(() => bridge.close());
+  await assert.rejects(bridge.run('version', '.'), /inside the workspace/);
+});
+test('Command errors do not reveal absolute device paths', async (t) => {
+  const { bridge, root } = await fixture(t, {
+    version: { executable: process.execPath, args: ['--version'] },
+    missing: { executable: '/nonexistent/bifrost-test-binary', args: [] },
+  });
+  const messages = [];
+  for (const [task, cwd] of [
+    ['version', 'no-such-directory'],
+    ['missing', '.'],
+  ])
+    await bridge.run(task, cwd).then(
+      () => assert.fail(`${task} should fail`),
+      (error) => messages.push(error.message),
+    );
+  for (const message of messages) {
+    assert.ok(!message.includes(root), message);
+    assert.ok(!message.includes('/nonexistent'), message);
+  }
+});

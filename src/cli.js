@@ -1,85 +1,26 @@
 #!/usr/bin/env node
-import fs from 'node:fs/promises';
+// Bifrost entry point: validates launch configuration, starts the optional owner console and
+// serves MCP over stdio or authenticated loopback Streamable HTTP.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import readline from 'node:readline';
 import { Policy } from './policy.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { Bridge } from './bridge.js';
 import { createServer } from './server.js';
+import { loadConfig } from './config.js';
+import { openTerminalConsole } from './console.js';
 
-if (!process.env.BIFROST_WORKSPACE)
-  throw Error(
-    'Set BIFROST_WORKSPACE to a dedicated workspace, separate from the bridge installation',
-  );
-const workspace = await fs.realpath(process.env.BIFROST_WORKSPACE);
-const installation = await fs.realpath(
+const config = await loadConfig(
+  process.env,
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
 );
-if (installation === workspace || installation.startsWith(workspace + path.sep))
-  throw Error('Workspace must not contain the bridge installation');
-let recipes = {};
-if (process.env.BIFROST_POLICY) {
-  const policy = await fs.realpath(process.env.BIFROST_POLICY);
-  if (policy === workspace || policy.startsWith(workspace + path.sep))
-    throw Error('Policy must be outside the model-accessible workspace');
-  recipes = JSON.parse(await fs.readFile(policy, 'utf8')).tasks ?? {};
-}
-const origins = JSON.parse(process.env.BIFROST_BROWSER_ORIGINS || '[]');
-if (
-  !Array.isArray(origins) ||
-  !origins.every((origin) => {
-    try {
-      return new URL(origin).origin === origin && /^https?:/.test(origin);
-    } catch {
-      return false;
-    }
-  })
-)
-  throw Error('Browser origins must be exact HTTP(S) origins');
-if (process.env.BIFROST_AUDIT_FILE) {
-  const audit = await fs.open(process.env.BIFROST_AUDIT_FILE, 'a', 0o600);
-  await audit.close();
-}
-const bridge = await new Bridge({
-  workspace,
-  recipes,
-  origins,
-  executablePath: process.env.BIFROST_CHROMIUM_EXECUTABLE,
-  auditFile: process.env.BIFROST_AUDIT_FILE,
-}).init();
-const policy = new Policy({ mode: process.env.BIFROST_MODE || 'auto' });
-let approvalConsole;
-if (process.env.BIFROST_APPROVAL_CONSOLE === '1') {
-  if (process.platform === 'win32')
-    throw Error('Local approval console currently requires a POSIX terminal');
-  const input = createReadStream('/dev/tty');
-  const output = createWriteStream('/dev/tty');
-  approvalConsole = readline.createInterface({ input, output });
-  output.write(
-    'Bifrost owner console: pending | approve REQUEST_ID | mode auto | mode ask. Bypass is unsupported.\n',
-  );
-  approvalConsole.on('line', (line) => {
-    try {
-      const [command, arg] = line.trim().split(/\s+/);
-      if (command === 'pending')
-        output.write(JSON.stringify(policy.pendingLocal(), null, 2) + '\n');
-      else if (command === 'approve') {
-        policy.approveLocal(arg);
-        output.write('Approved once\n');
-      } else if (command === 'mode') {
-        policy.setLocal(arg);
-        output.write('Mode ' + policy.mode + '\n');
-      } else output.write('Unknown command\n');
-    } catch (error) {
-      output.write(error.message + '\n');
-    }
-  });
-}
+const bridge = await new Bridge(config).init();
+const policy = new Policy({ mode: config.mode });
+const approvalConsole =
+  process.env.BIFROST_APPROVAL_CONSOLE === '1' ? openTerminalConsole(policy) : null;
 let listener;
 const servers = new Set();
 async function shutdown() {

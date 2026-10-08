@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 const execFileAsync = promisify(execFile);
 import { chromium } from 'playwright';
 import { startEgressProxy } from './egress.js';
+import { isInside } from './config.js';
 
 export class Bridge {
   constructor({ workspace, recipes = {}, origins = [], executablePath, auditFile }) {
@@ -39,10 +40,11 @@ export class Bridge {
     if (typeof relative !== 'string' || relative.includes('\0') || path.isAbsolute(relative))
       throw Error('Relative workspace path required');
     const lexical = path.resolve(this.root, relative);
-    const inside = (p) => p === this.root || p.startsWith(this.root + path.sep);
-    if (!inside(lexical)) throw Error('Path is outside the workspace');
-    const resolved = await fs.realpath(lexical);
-    if (!inside(resolved)) throw Error('Symlink target is outside the workspace');
+    if (!isInside(this.root, lexical)) throw Error('Path is outside the workspace');
+    const resolved = await fs.realpath(lexical).catch(() => {
+      throw Error('Workspace path does not exist');
+    });
+    if (!isInside(this.root, resolved)) throw Error('Symlink target is outside the workspace');
     return resolved;
   }
   async receipt(tool, outcome, started) {
@@ -161,9 +163,10 @@ export class Bridge {
     )
       throw Error('Invalid operator recipe');
     if (this.children.size >= 4) throw Error('Terminal concurrency limit reached');
-    const executable = await fs.realpath(recipe.executable);
-    if (executable === this.root || executable.startsWith(this.root + path.sep))
-      throw Error('Executable cannot be inside the workspace');
+    const executable = await fs.realpath(recipe.executable).catch(() => {
+      throw Error('Recipe executable is unavailable; check the operator policy');
+    });
+    if (isInside(this.root, executable)) throw Error('Executable cannot be inside the workspace');
     const cwd = await this.scoped(relative);
     if (!(await fs.stat(cwd)).isDirectory()) throw Error('Working directory required');
     if (signal?.aborted) throw Error('Cancelled');
@@ -206,7 +209,7 @@ export class Bridge {
       };
       child.on('error', (err) => {
         cleanup();
-        reject(err);
+        reject(Error(`Recipe could not start (${err.code ?? 'error'})`));
       });
       child.on('close', (code, terminationSignal) => {
         cleanup();
