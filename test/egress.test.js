@@ -108,3 +108,44 @@ test('Egress proxy tunnels CONNECT only to an approved HTTPS origin', async (t) 
   });
   assert.match(await connectStatus(proxy.address().port, authority), / 200 /);
 });
+
+test('Egress proxy survives an approved server sending an invalid status line', async (t) => {
+  const connections = new Set();
+  const raw = net.createServer((socket) => {
+    connections.add(socket);
+    socket.end('HTTP/1.1 000 Zero\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+  });
+  await new Promise((resolve) => raw.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${raw.address().port}`;
+  const proxy = await startEgressProxy((url) => new URL(url).origin === origin);
+  t.after(async () => {
+    await proxy.close();
+    for (const socket of connections) socket.destroy();
+    await new Promise((resolve) => raw.close(resolve));
+  });
+  assert.equal((await proxiedGet(proxy.address().port, `${origin}/`)).status, 502);
+  assert.equal((await proxiedGet(proxy.address().port, 'http://127.0.0.1:9/')).status, 403);
+});
+
+test('Egress proxy pins each hostname to its first DNS answer', async (t) => {
+  const target = await listen((req, res) => res.end(`host=${req.headers.host}`));
+  const port = new URL(target.origin).port;
+  const answers = ['127.0.0.1', '10.255.255.1'];
+  const lookups = [];
+  const lookup = async (hostname) => {
+    lookups.push(hostname);
+    return { address: answers[lookups.length - 1], family: 4 };
+  };
+  const approved = `http://rebind.test:${port}`;
+  const proxy = await startEgressProxy((url) => new URL(url).origin === approved, { lookup });
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => target.server.close(resolve));
+  });
+  for (let i = 0; i < 2; i++) {
+    const response = await proxiedGet(proxy.address().port, `${approved}/page`);
+    assert.equal(response.status, 200);
+    assert.equal(response.body, `host=rebind.test:${port}`);
+  }
+  assert.deepEqual(lookups, ['rebind.test']);
+});
