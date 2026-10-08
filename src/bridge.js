@@ -12,6 +12,11 @@ import { chromium } from 'playwright';
 import { startEgressProxy } from './egress.js';
 import { isInside } from './config.js';
 
+const PAGE_READ_TIMEOUT_MS = 5000;
+const ACTION_BACKSTOP_MS = 30000;
+const STALLED =
+  'The page stopped responding; the browser was closed and restarts on the next action';
+
 export class Bridge {
   constructor({ workspace, recipes = {}, origins = [], executablePath, auditFile }) {
     this.sessionId = crypto.randomUUID();
@@ -127,7 +132,13 @@ export class Bridge {
     try {
       const { stdout } = await execFileAsync(
         '/usr/bin/python3',
-        [fileURLToPath(new URL('./files.py', import.meta.url)), this.root, operation, relative],
+        [
+          '-I',
+          fileURLToPath(new URL('./files.py', import.meta.url)),
+          this.root,
+          operation,
+          relative,
+        ],
         { timeout: 5000, maxBuffer: 262144, env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } },
       );
       return JSON.parse(stdout);
@@ -170,7 +181,8 @@ export class Bridge {
     });
     if (isInside(this.root, executable)) throw Error('Executable cannot be inside the workspace');
     const cwd = await this.scoped(relative);
-    if (!(await fs.stat(cwd)).isDirectory()) throw Error('Working directory required');
+    const directory = await fs.stat(cwd).catch(() => null);
+    if (!directory?.isDirectory()) throw Error('Working directory required');
     if (signal?.aborted) throw Error('Cancelled');
     const timeoutMs = Math.min(Math.max(recipe.timeoutMs ?? 10000, 100), 30000);
     guard();
@@ -253,34 +265,79 @@ export class Bridge {
       guard();
       if (!this.browser) await this.launchBrowser();
       guard();
-      if (action === 'navigate') {
-        if (!this.allowed(args.url)) throw Error('Origin is not operator-approved');
-        try {
-          await this.page.goto(args.url, { waitUntil: 'domcontentloaded' });
-        } finally {
-          if (!this.pageIsApproved()) await this.page.goto('about:blank').catch(() => {});
-        }
-        if (!this.allowed(this.page.url())) throw Error('Navigation left approved origins');
-      } else if (!this.pageIsApproved())
-        throw Error('The current page is outside approved origins; navigate to an approved origin');
-      else if (action === 'click') await this.page.locator(args.selector).click();
-      else if (action === 'fill') await this.page.locator(args.selector).fill(args.value);
-      else if (action === 'screenshot')
-        return {
-          image: (await this.page.screenshot({ type: 'png', fullPage: false })).toString('base64'),
-        };
-      else if (action !== 'snapshot') throw Error('Unknown browser action');
-      return {
-        url: this.page.url(),
-        title: await this.page.title(),
-        text: (await this.page.locator('body').innerText()).slice(0, 16384),
-      };
+      return this.settle(this.pageAction(action, args, guard), ACTION_BACKSTOP_MS);
     };
     const next = this.browserQueue.then(work);
     this.browserQueue = next.catch(() => {});
     return next.finally(() => {
       this.queuedBrowser--;
     });
+  }
+  async pageAction(action, args, guard) {
+    const version = this.documentVersion;
+    if (action === 'navigate') {
+      if (!this.allowed(args.url)) throw Error('Origin is not operator-approved');
+      try {
+        await this.page.goto(args.url, { waitUntil: 'domcontentloaded' });
+      } finally {
+        if (!this.pageIsApproved()) await this.page.goto('about:blank').catch(() => {});
+      }
+      if (!this.allowed(this.page.url())) throw Error('Navigation left approved origins');
+    } else if (!this.pageIsApproved())
+      throw Error('The current page is outside approved origins; navigate to an approved origin');
+    else if (action === 'click' || action === 'fill') {
+      const element = await this.elementOnApprovedDocument(args.selector, version, guard);
+      try {
+        if (action === 'click') await element.click();
+        else await element.fill(args.value);
+      } finally {
+        await element.dispose().catch(() => {});
+      }
+    } else if (action === 'screenshot')
+      return {
+        image: (await this.page.screenshot({ type: 'png', fullPage: false })).toString('base64'),
+      };
+    else if (action !== 'snapshot') throw Error('Unknown browser action');
+    const [title, text] = await this.settle(
+      Promise.all([this.page.title(), this.page.locator('body').innerText({ timeout: 10000 })]),
+      PAGE_READ_TIMEOUT_MS,
+    );
+    return { url: this.page.url(), title, text: text.slice(0, 16384) };
+  }
+  // A locator re-resolves after every navigation, so an approved click could land on a page that
+  // replaced the approved one. An element handle belongs to one document and fails once it is gone.
+  async elementOnApprovedDocument(selector, version, guard) {
+    if (/enter-frame|internal:control/i.test(selector))
+      throw Error('Selectors cannot enter frames; act on the top-level document only');
+    const element = await this.page.locator(selector).elementHandle();
+    try {
+      if (this.documentVersion !== version)
+        throw Error('Browser document changed; retry the action');
+      guard();
+    } catch (error) {
+      await element.dispose().catch(() => {});
+      throw error;
+    }
+    return element;
+  }
+  // Some page calls have no timeout of their own; a page that hangs its renderer must not wedge the
+  // browser queue for the rest of the session.
+  async settle(promise, ms) {
+    let timer;
+    const stalled = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(Error(STALLED)), ms);
+    });
+    try {
+      return await Promise.race([promise, stalled]);
+    } catch (error) {
+      if (error.message === STALLED) {
+        promise.catch(() => {});
+        await this.releaseBrowser();
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   async launchBrowser() {
     try {
@@ -314,7 +371,9 @@ export class Bridge {
       this.page.setDefaultNavigationTimeout(10000);
     } catch (error) {
       await this.releaseBrowser();
-      throw error;
+      const reason = String(error.message).split('\n')[0];
+      process.stderr.write(`Bifrost browser setup failed: ${reason}\n`);
+      throw Error('Browser could not start; the operator should check Chromium and its sandbox');
     }
   }
   async releaseBrowser() {
@@ -330,6 +389,7 @@ export class Bridge {
   async close() {
     this.closed = true;
     for (const child of this.children) killGroup(child);
+    await this.releaseBrowser();
     await this.browserQueue;
     await this.releaseBrowser();
   }

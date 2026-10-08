@@ -6,7 +6,11 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Bridge } from '../src/bridge.js';
+import { Policy } from '../src/policy.js';
+import { createServer } from '../src/server.js';
 
 async function listen(handler) {
   const server = http.createServer(handler);
@@ -109,4 +113,73 @@ test('Browser runs sandboxed in a temporary home and leaves nothing behind', asy
   await bridge.close();
   assert.deepEqual(await processesWithHome(home), []);
   await assert.rejects(fs.stat(home));
+});
+
+async function siteWithClient(t, pages) {
+  const hits = [];
+  const site = await listen((req, res) => {
+    hits.push(req.url);
+    res.setHeader('content-type', 'text/html');
+    res.end(pages[req.url] ?? '<title>Plain</title><p>plain page</p>');
+  });
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bifrost-browser-mcp-'));
+  const bridge = await new Bridge({
+    workspace: dir,
+    origins: [site.origin],
+    executablePath: process.env.BIFROST_CHROMIUM_EXECUTABLE,
+  }).init();
+  const server = createServer(bridge, new Policy({ mode: 'auto' }));
+  const client = new Client({ name: 'browser-test', version: '1' });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(a);
+  await client.connect(b);
+  t.after(async () => {
+    await client.close();
+    await server.close();
+    await bridge.close();
+    await new Promise((resolve) => site.server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  return { bridge, client, origin: site.origin, hits };
+}
+
+test('A click cannot land on a page that replaced the one it was requested for', async (t) => {
+  const { client, origin, hits } = await siteWithClient(t, {
+    '/a': `<title>A</title><button id="ok" style="display:none">A</button>
+      <script>setTimeout(() => { location = '/b'; }, 300)</script>`,
+    '/b': `<title>B</title><button id="ok" onclick="fetch('/clicked')">B</button>`,
+  });
+  await client.callTool({ name: 'browser_navigate', arguments: { url: `${origin}/a` } });
+  const result = await client.callTool({ name: 'browser_click', arguments: { selector: '#ok' } });
+  assert.equal(result.isError, true);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.ok(!hits.includes('/clicked'), JSON.stringify(hits));
+});
+
+test('Selectors cannot reach into frames outside the approved document binding', async (t) => {
+  const { client, origin } = await siteWithClient(t, {
+    '/framed': `<title>Framed</title><iframe src="/inner"></iframe>`,
+    '/inner': `<title>Inner</title><button id="x">x</button>`,
+  });
+  await client.callTool({ name: 'browser_navigate', arguments: { url: `${origin}/framed` } });
+  const result = await client.callTool({
+    name: 'browser_click',
+    arguments: { selector: 'iframe >> internal:control=enter-frame >> #x' },
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /frame/i);
+});
+
+test('A page that hangs its renderer is released instead of wedging the browser', async (t) => {
+  const { bridge, origin } = await siteWithClient(t, {
+    '/busy': `<title>Busy</title><script>setTimeout(() => { for (;;) {} }, 50)</script>`,
+  });
+  await bridge.browserAction('navigate', { url: `${origin}/busy` }).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const started = Date.now();
+  await assert.rejects(bridge.browserAction('snapshot', {}), /stopped responding/);
+  assert.ok(Date.now() - started < 15000);
+  assert.equal(bridge.browser, null);
+  const page = await bridge.browserAction('navigate', { url: `${origin}/plain` });
+  assert.equal(page.title, 'Plain');
 });

@@ -230,9 +230,21 @@ test('A browser that fails during setup is closed and its resources removed', as
     chromium.launch = launch;
   });
   const { bridge } = await fixture(t);
-  await assert.rejects(bridge.browserAction('snapshot', {}), /context setup failed/);
+  await assert.rejects(bridge.browserAction('snapshot', {}), /Browser could not start/);
   assert.equal(closed, true);
   assert.equal(bridge.browser, null);
   assert.equal(bridge.egress, null);
   assert.equal(bridge.browserHome, null);
+});
+test('Browser launch errors do not reveal device paths', async (t) => {
+  const { bridge, root } = await fixture(t);
+  bridge.executablePath = '/nonexistent/bifrost-browser-marker';
+  bridge.origins.add('http://127.0.0.1:9');
+  const error = await bridge.browserAction('snapshot', {}).then(
+    () => assert.fail('launch should fail'),
+    (failure) => failure,
+  );
+  assert.ok(!error.message.includes('/nonexistent'), error.message);
+  assert.ok(!error.message.includes(root), error.message);
+  assert.equal(bridge.browser, null);
 });
